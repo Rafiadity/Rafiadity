@@ -91,6 +91,18 @@ class Product:
         return f"ID: {self.product_id} | {self.name} | {self.category} | ${self.price:.2f} | Qty: {self.quantity}"
 
 
+class Activity:
+    """Represents an activity/action in the system."""
+
+    def __init__(self, action: str, description: str):
+        self.action = action
+        self.description = description
+        self.timestamp = datetime.now().strftime("%H:%M:%S")
+
+    def __str__(self) -> str:
+        return f"[{self.timestamp}] {self.action}: {self.description}"
+
+
 class InventoryManager:
     """Manages the inventory system operations."""
 
@@ -98,6 +110,8 @@ class InventoryManager:
         self.data_file = data_file
         self.products: Dict[int, Product] = {}
         self.next_id = 1
+        self.activities: List[Activity] = []
+        self.recent_products: List[int] = []  # Track recently accessed product IDs
         self.load_data()
 
     def load_data(self):
@@ -126,17 +140,46 @@ class InventoryManager:
         except Exception as e:
             print(f"{Colors.RED}✗ Error saving data: {e}{Colors.RESET}")
 
+    def log_activity(self, action: str, description: str):
+        """Log an activity."""
+        activity = Activity(action, description)
+        self.activities.append(activity)
+        if len(self.activities) > 50:  # Keep last 50 activities
+            self.activities = self.activities[-50:]
+
+    def add_to_recent(self, product_id: int):
+        """Add product to recently accessed list."""
+        if product_id in self.recent_products:
+            self.recent_products.remove(product_id)
+        self.recent_products.insert(0, product_id)
+        if len(self.recent_products) > 10:  # Keep last 10
+            self.recent_products = self.recent_products[:10]
+
+    def get_categories(self) -> List[str]:
+        """Get all unique categories."""
+        categories = set(p.category for p in self.products.values())
+        return sorted(categories)
+
+    def get_products_by_category(self, category: str) -> List[Product]:
+        """Get all products in a category."""
+        return [p for p in self.products.values() if p.category.lower() == category.lower()]
+
     def add_product(self, name: str, category: str, price: float, quantity: int) -> Product:
         """Add a new product to inventory."""
         product = Product(self.next_id, name, category, price, quantity)
         self.products[self.next_id] = product
         self.next_id += 1
         self.save_data()
+        self.log_activity("ADD", f"Added '{name}' (ID: {product.product_id})")
+        self.add_to_recent(product.product_id)
         return product
 
     def get_product(self, product_id: int) -> Optional[Product]:
         """Get a product by ID."""
-        return self.products.get(product_id)
+        product = self.products.get(product_id)
+        if product:
+            self.add_to_recent(product_id)
+        return product
 
     def update_quantity(self, product_id: int, quantity_change: int) -> bool:
         """Update product quantity (positive to add, negative to remove)."""
@@ -146,9 +189,12 @@ class InventoryManager:
             if new_quantity < 0:
                 print(f"⚠ Cannot set negative quantity. Current: {product.quantity}")
                 return False
+            old_qty = product.quantity
             product.quantity = new_quantity
             product.last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.save_data()
+            action = "STOCK+" if quantity_change > 0 else "STOCK-"
+            self.log_activity(action, f"'{product.name}' quantity: {old_qty} → {new_quantity}")
             return True
         return False
 
@@ -156,17 +202,23 @@ class InventoryManager:
         """Update product price."""
         product = self.get_product(product_id)
         if product:
+            old_price = product.price
             product.price = new_price
             product.last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.save_data()
+            self.log_activity("PRICE", f"'{product.name}' price: ${old_price:.2f} → ${new_price:.2f}")
             return True
         return False
 
     def delete_product(self, product_id: int) -> bool:
         """Delete a product from inventory."""
         if product_id in self.products:
+            product = self.products[product_id]
             del self.products[product_id]
+            if product_id in self.recent_products:
+                self.recent_products.remove(product_id)
             self.save_data()
+            self.log_activity("DELETE", f"Deleted '{product.name}' (ID: {product_id})")
             return True
         return False
 
@@ -311,6 +363,159 @@ def pause():
     input(f"\n{Colors.DIM}Press Enter to continue...{Colors.RESET}")
 
 
+def show_dashboard(inventory: 'InventoryManager'):
+    """Display interactive dashboard with key metrics."""
+    clear_screen()
+    print_header("📊 Dashboard", "Live Inventory Overview")
+
+    report = inventory.generate_report()
+
+    # Quick Stats
+    print_section("Quick Stats")
+    print(f"  {Colors.BOLD}Total Products:{Colors.RESET} {Colors.CYAN}{report['total_products']}{Colors.RESET}")
+    print(f"  {Colors.BOLD}Total Value:{Colors.RESET} {Colors.GREEN}${report['total_value']:,.2f}{Colors.RESET}")
+    print(f"  {Colors.BOLD}Categories:{Colors.RESET} {Colors.MAGENTA}{len(report['categories'])}{Colors.RESET}")
+    print(f"  {Colors.BOLD}Low Stock Items:{Colors.RESET} {Colors.YELLOW if report['low_stock'] else Colors.GREEN}{len(report['low_stock'])}{Colors.RESET}")
+
+    # Categories Overview
+    if report['categories']:
+        print_section("Top Categories")
+        sorted_cats = sorted(report['categories'].items(), key=lambda x: x[1]['total_value'], reverse=True)[:5]
+        for i, (category, data) in enumerate(sorted_cats, 1):
+            bar_length = int((data['total_value'] / report['total_value']) * 30) if report['total_value'] > 0 else 0
+            bar = f"{Colors.CYAN}{'█' * bar_length}{Colors.DIM}{'░' * (30 - bar_length)}{Colors.RESET}"
+            print(f"  {i}. {Colors.BOLD}{category:<15}{Colors.RESET} {bar} ${data['total_value']:>10,.2f}")
+
+    # Recent Activity
+    if inventory.activities:
+        print_section("Recent Activity")
+        for activity in inventory.activities[-5:]:
+            # Color code by action type
+            if activity.action == "ADD":
+                icon = f"{Colors.GREEN}➕{Colors.RESET}"
+            elif activity.action in ["STOCK+", "STOCK-"]:
+                icon = f"{Colors.BLUE}📦{Colors.RESET}"
+            elif activity.action == "PRICE":
+                icon = f"{Colors.YELLOW}💰{Colors.RESET}"
+            elif activity.action == "DELETE":
+                icon = f"{Colors.RED}🗑️{Colors.RESET}"
+            else:
+                icon = "•"
+            print(f"  {Colors.DIM}{activity.timestamp}{Colors.RESET} {icon} {activity.description}")
+
+    # Alerts
+    if report['low_stock']:
+        print_section(f"{Colors.YELLOW}⚠  Stock Alerts{Colors.RESET}")
+        for product in report['low_stock'][:5]:
+            print(f"  {Colors.YELLOW}•{Colors.RESET} {product.name} {Colors.DIM}(ID: {product.product_id}){Colors.RESET} - Only {Colors.RED}{product.quantity}{Colors.RESET} left")
+
+    pause()
+
+
+def show_recent_products(inventory: 'InventoryManager'):
+    """Show recently accessed products for quick actions."""
+    if not inventory.recent_products:
+        print_info("No recently accessed products yet.")
+        return
+
+    print_section("Recently Accessed Products")
+    recent = [inventory.products[pid] for pid in inventory.recent_products if pid in inventory.products]
+    print_products(recent[:5])
+
+
+def browse_by_category(inventory: 'InventoryManager'):
+    """Browse products by category interactively."""
+    clear_screen()
+    print_header("📂 Browse by Category")
+
+    categories = inventory.get_categories()
+    if not categories:
+        print_warning("No categories available yet. Add some products first!")
+        pause()
+        return
+
+    print(f"\n{Colors.BOLD}Available Categories:{Colors.RESET}")
+    for i, cat in enumerate(categories, 1):
+        count = len(inventory.get_products_by_category(cat))
+        print(f"  {Colors.GREEN}[{i}]{Colors.RESET} {cat} {Colors.DIM}({count} products){Colors.RESET}")
+
+    print(f"  {Colors.RED}[0]{Colors.RESET} Back to menu")
+
+    choice = get_input(f"\n{Colors.BOLD}Select category{Colors.RESET}", int)
+    if choice is None or choice == 0:
+        return
+
+    if 1 <= choice <= len(categories):
+        selected_cat = categories[choice - 1]
+        products = inventory.get_products_by_category(selected_cat)
+        print_section(f"Products in {selected_cat}")
+        print_products(products)
+        pause()
+
+
+def quick_stock_update(inventory: 'InventoryManager'):
+    """Quick stock update interface."""
+    clear_screen()
+    print_header("⚡ Quick Stock Update")
+
+    # Show recent products for convenience
+    if inventory.recent_products:
+        show_recent_products(inventory)
+
+    print(f"\n{Colors.BOLD}Quick Actions:{Colors.RESET}")
+    print(f"  {Colors.GREEN}+{Colors.RESET} Add stock  |  {Colors.YELLOW}-{Colors.RESET} Remove stock")
+
+    product_id = get_input(f"\n{Colors.BOLD}Product ID{Colors.RESET}", int)
+    if product_id is None:
+        return
+
+    product = inventory.get_product(product_id)
+    if not product:
+        print_error(f"Product ID {product_id} not found.")
+        pause()
+        return
+
+    print(f"\n{Colors.DIM}Product:{Colors.RESET} {product.name}")
+    print(f"{Colors.DIM}Current Stock:{Colors.RESET} {product.quantity}")
+
+    change = get_input(f"\n{Colors.BOLD}Change amount{Colors.RESET} {Colors.DIM}(+10, -5, etc.){Colors.RESET}", int)
+    if change is None:
+        return
+
+    if inventory.update_quantity(product_id, change):
+        print()
+        print_success(f"Stock updated! {product.name}: {product.quantity - change} → {product.quantity}")
+        if product.quantity < 10:
+            print_warning(f"Low stock alert: Only {product.quantity} units remaining")
+    pause()
+
+
+def export_inventory(inventory: 'InventoryManager'):
+    """Export inventory to CSV format."""
+    clear_screen()
+    print_header("💾 Export Inventory")
+
+    filename = get_input(f"\n{Colors.BOLD}Export filename{Colors.RESET} {Colors.DIM}(.csv){Colors.RESET}", str, default="inventory_export.csv", allow_empty=True)
+    if filename is None:
+        return
+
+    if not filename.endswith('.csv'):
+        filename += '.csv'
+
+    try:
+        with open(filename, 'w') as f:
+            f.write("ID,Name,Category,Price,Quantity,Last Updated\n")
+            for product in inventory.get_all_products():
+                f.write(f"{product.product_id},{product.name},{product.category},{product.price},{product.quantity},{product.last_updated}\n")
+        print()
+        print_success(f"Inventory exported to {filename}")
+        print_info(f"Total {len(inventory.products)} products exported")
+    except Exception as e:
+        print_error(f"Export failed: {e}")
+
+    pause()
+
+
 def main():
     """Main application loop."""
     clear_screen()
@@ -325,15 +530,22 @@ def main():
         print(f"\n{Colors.BOLD}{Colors.CYAN}╔{'═' * 68}╗{Colors.RESET}")
         print(f"{Colors.BOLD}{Colors.CYAN}║{Colors.RESET}  {Colors.BOLD}MAIN MENU{Colors.RESET}{' ' * 56}{Colors.BOLD}{Colors.CYAN}║{Colors.RESET}")
         print(f"{Colors.BOLD}{Colors.CYAN}╠{'═' * 68}╣{Colors.RESET}")
-        print(f"{Colors.BOLD}{Colors.CYAN}║{Colors.RESET}  {Colors.GREEN}[1]{Colors.RESET} Add New Product        {Colors.GREEN}[5]{Colors.RESET} Update Price          {Colors.BOLD}{Colors.CYAN}║{Colors.RESET}")
-        print(f"{Colors.BOLD}{Colors.CYAN}║{Colors.RESET}  {Colors.GREEN}[2]{Colors.RESET} View All Products      {Colors.GREEN}[6]{Colors.RESET} Delete Product        {Colors.BOLD}{Colors.CYAN}║{Colors.RESET}")
-        print(f"{Colors.BOLD}{Colors.CYAN}║{Colors.RESET}  {Colors.GREEN}[3]{Colors.RESET} Search Products        {Colors.GREEN}[7]{Colors.RESET} Generate Report       {Colors.BOLD}{Colors.CYAN}║{Colors.RESET}")
-        print(f"{Colors.BOLD}{Colors.CYAN}║{Colors.RESET}  {Colors.GREEN}[4]{Colors.RESET} Update Stock           {Colors.RED}[Q]{Colors.RESET} Quit                  {Colors.BOLD}{Colors.CYAN}║{Colors.RESET}")
+        print(f"{Colors.BOLD}{Colors.CYAN}║{Colors.RESET}  {Colors.MAGENTA}[D]{Colors.RESET} 📊 Dashboard           {Colors.GREEN}[5]{Colors.RESET} 💰 Update Price       {Colors.BOLD}{Colors.CYAN}║{Colors.RESET}")
+        print(f"{Colors.BOLD}{Colors.CYAN}║{Colors.RESET}  {Colors.GREEN}[1]{Colors.RESET} ➕ Add Product          {Colors.GREEN}[6]{Colors.RESET} 🗑️  Delete Product     {Colors.BOLD}{Colors.CYAN}║{Colors.RESET}")
+        print(f"{Colors.BOLD}{Colors.CYAN}║{Colors.RESET}  {Colors.GREEN}[2]{Colors.RESET} 📦 View All            {Colors.GREEN}[7]{Colors.RESET} 📈 Report             {Colors.BOLD}{Colors.CYAN}║{Colors.RESET}")
+        print(f"{Colors.BOLD}{Colors.CYAN}║{Colors.RESET}  {Colors.GREEN}[3]{Colors.RESET} 🔍 Search              {Colors.YELLOW}[Q]{Colors.RESET} ⚡ Quick Stock       {Colors.BOLD}{Colors.CYAN}║{Colors.RESET}")
+        print(f"{Colors.BOLD}{Colors.CYAN}║{Colors.RESET}  {Colors.GREEN}[4]{Colors.RESET} 📂 By Category         {Colors.CYAN}[E]{Colors.RESET} 💾 Export            {Colors.BOLD}{Colors.CYAN}║{Colors.RESET}")
+        print(f"{Colors.BOLD}{Colors.CYAN}╠{'═' * 68}╣{Colors.RESET}")
+        print(f"{Colors.BOLD}{Colors.CYAN}║{Colors.RESET}  {Colors.RED}[X]{Colors.RESET} Exit{' ' * 58}{Colors.BOLD}{Colors.CYAN}║{Colors.RESET}")
         print(f"{Colors.BOLD}{Colors.CYAN}╚{'═' * 68}╝{Colors.RESET}")
 
-        choice = input(f"\n{Colors.BOLD}Select option{Colors.RESET} {Colors.DIM}(1-7, Q){Colors.RESET}: ").strip().lower()
+        choice = input(f"\n{Colors.BOLD}Select option{Colors.RESET}: ").strip().lower()
 
-        if choice == '1':
+        if choice == 'd':
+            # Dashboard
+            show_dashboard(inventory)
+
+        elif choice == '1':
             # Add Product
             clear_screen()
             print_header("➕ Add New Product")
@@ -342,6 +554,11 @@ def main():
             name = get_input(f"\n{Colors.BOLD}Product Name{Colors.RESET}")
             if name is None:
                 continue
+
+            # Show existing categories for suggestion
+            existing_cats = inventory.get_categories()
+            if existing_cats:
+                print(f"\n{Colors.DIM}Existing categories: {', '.join(existing_cats[:5])}{Colors.RESET}")
 
             category = get_input(f"{Colors.BOLD}Category{Colors.RESET} {Colors.DIM}(e.g., Electronics, Furniture){Colors.RESET}")
             if category is None:
@@ -404,32 +621,16 @@ def main():
             pause()
 
         elif choice == '4':
-            # Update Quantity
-            clear_screen()
-            print_header("📊 Update Stock")
+            # Browse by Category
+            browse_by_category(inventory)
 
-            product_id = get_input(f"\n{Colors.BOLD}Product ID{Colors.RESET}", int)
-            if product_id is None:
-                continue
+        elif choice == 'q':
+            # Quick Stock Update
+            quick_stock_update(inventory)
 
-            product = inventory.get_product(product_id)
-            if product:
-                print(f"\n{Colors.DIM}Current Product:{Colors.RESET}")
-                print_products([product])
-
-                change = get_input(f"\n{Colors.BOLD}Quantity Change{Colors.RESET} {Colors.DIM}(use +/- for add/remove){Colors.RESET}", int)
-                if change is None:
-                    continue
-
-                if inventory.update_quantity(product_id, change):
-                    print()
-                    print_success(f"Stock updated! New quantity: {product.quantity}")
-                    if product.quantity < 10:
-                        print_warning(f"Low stock alert: Only {product.quantity} units remaining")
-            else:
-                print_error(f"Product ID {product_id} not found.")
-
-            pause()
+        elif choice == 'e':
+            # Export
+            export_inventory(inventory)
 
         elif choice == '5':
             # Update Price
@@ -517,7 +718,7 @@ def main():
 
             pause()
 
-        elif choice in ['8', 'q', 'quit', 'exit']:
+        elif choice in ['x', 'exit', 'quit']:
             # Exit
             clear_screen()
             print(f"\n{Colors.BOLD}{Colors.CYAN}╔{'═' * 68}╗{Colors.RESET}")
@@ -527,7 +728,7 @@ def main():
             break
 
         else:
-            print_error(f"Invalid option '{choice}'. Please select 1-7 or Q.")
+            print_error(f"Invalid option '{choice}'. Please check the menu.")
             pause()
 
 
