@@ -1,17 +1,27 @@
 # Inventory Management System
 
-A simple, professional business application for managing product inventory with full CRUD operations.
+A simple, professional business application for managing product inventory with full CRUD operations and a beautiful, intuitive interface.
 
 ## Features
 
+### Core Functionality
 - **Add Products**: Create new product entries with name, category, price, and quantity
-- **View Inventory**: Display all products in a formatted table
+- **View Inventory**: Display all products in a beautifully formatted table
 - **Search**: Find products by name or category
 - **Update Quantity**: Adjust stock levels (add or remove items)
-- **Update Price**: Modify product prices
-- **Delete Products**: Remove items from inventory
+- **Update Price**: Modify product prices with percentage change tracking
+- **Delete Products**: Remove items from inventory with confirmation
 - **Generate Reports**: View statistics including total value, categories, and low-stock alerts
 - **Data Persistence**: Automatic save/load using JSON file storage
+
+### User Interface Enhancements
+- **Color-Coded Display**: Visual feedback with colors (green for success, red for errors, yellow for warnings)
+- **Box-Drawing Characters**: Professional-looking menus and headers with Unicode box characters
+- **Smart Input Helpers**: Context-aware prompts with examples and format hints
+- **Stock Level Colors**: Automatic color coding (green = good stock, yellow = low, red = critical)
+- **Progress Indicators**: Real-time feedback for all operations
+- **Clear Screen Management**: Clean transitions between screens for better focus
+- **Keyboard Shortcuts**: Quick navigation with number keys and 'Q' to quit
 
 ## Requirements
 
@@ -90,23 +100,36 @@ Each product tracks its last update timestamp.
 - Validates numeric inputs
 - Confirms deletions to prevent accidents
 
-## Example Session
+## User Interface Preview
+
+The application features a modern, color-coded terminal interface:
 
 ```
-Select an option (1-8): 1
-Product Name: Wireless Mouse
-Category: Electronics
-Price: $29.99
-Quantity: 50
-✓ Product added successfully! ID: 1
+╔════════════════════════════════════════════════════════════════════╗
+║              🏪 Inventory Management System                        ║
+║              Professional Business Inventory Solution              ║
+╚════════════════════════════════════════════════════════════════════╝
 
-Select an option (1-8): 2
-ID     Name                 Category        Price      Qty
-------------------------------------------------------------
-1      Wireless Mouse       Electronics     $29.99     50
+  ✓ System ready  |  5 products loaded  |  Data file: inventory_data.json
 
-Total Inventory Value: $1,499.50
+╔════════════════════════════════════════════════════════════════════╗
+║  MAIN MENU                                                         ║
+╠════════════════════════════════════════════════════════════════════╣
+║  [1] Add New Product        [5] Update Price                       ║
+║  [2] View All Products      [6] Delete Product                     ║
+║  [3] Search Products        [7] Generate Report                    ║
+║  [4] Update Stock           [Q] Quit                               ║
+╚════════════════════════════════════════════════════════════════════╝
+
+Select option (1-7, Q):
 ```
+
+### Visual Features
+- Stock levels are color-coded: **Green** (10+), **Yellow** (5-9), **Red** (<5)
+- Success messages appear in green with checkmarks
+- Warnings appear in yellow with alert symbols
+- Errors appear in red with X symbols
+- Box-drawing characters create professional-looking frames
 
 ## License
 
